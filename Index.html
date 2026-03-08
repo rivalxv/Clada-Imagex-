@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Clada ImageX | Premium</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+<style>
+:root {
+    --accent: #ffffff;
+    --bg: #050505;
+    --card: rgba(25, 25, 25, 0.7);
+    --border: rgba(255, 255, 255, 0.1);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; outline: none; }
+
+body, html {
+    margin: 0; padding: 0; height: 100%;
+    background-color: var(--bg); color: #fff;
+    font-family: -apple-system, system-ui, sans-serif;
+    display: flex; flex-direction: column; overflow: hidden;
+}
+
+/* --- BRANDING --- */
+.brand-header {
+    position: absolute; top: 35px; left: 30px;
+    display: flex; align-items: center; gap: 15px; z-index: 100;
+}
+.logo-container { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+.logo-sq { width: 11px; height: 11px; border: 2px solid var(--accent); border-radius: 3px; }
+.brand-name { font-size: 22px; font-weight: 900; background: linear-gradient(#fff, #888); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+
+/* --- ANIMATED LOADER --- */
+.grok-dot-field {
+    display: none; grid-template-columns: repeat(8, 1fr); gap: 18px;
+    width: 240px; height: 240px; opacity: 0; transition: opacity 0.4s ease;
+}
+.grok-dot {
+    width: 5px; height: 5px; background: var(--accent); border-radius: 50%;
+    box-shadow: 0 0 10px var(--accent);
+    animation: grok-pulse 1.8s infinite ease-in-out;
+}
+@keyframes grok-pulse {
+    0%, 100% { transform: scale(1); opacity: 0.1; }
+    50% { transform: scale(1.8); opacity: 0.9; }
+}
+
+/* --- MAIN CANVAS --- */
+.display { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; position: relative; }
+#outputImg { max-width: 95%; max-height: 80%; border-radius: 20px; display: none; z-index: 5; box-shadow: 0 30px 60px rgba(0,0,0,0.8); }
+
+/* --- UI CONTROLS --- */
+.input-area { padding: 40px 25px; display: flex; justify-content: center; z-index: 10; }
+.search-container { width: 100%; max-width: 600px; background: var(--card); backdrop-filter: blur(25px); border: 1px solid var(--border); border-radius: 30px; display: flex; align-items: center; padding: 12px 18px; }
+input { flex: 1; background: transparent; border: none; color: #fff; font-size: 17px; padding: 12px; }
+#genBtn { background: var(--accent); border: none; width: 50px; height: 50px; border-radius: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: transform 0.2s; }
+#genBtn:active { transform: scale(0.9); }
+
+/* --- CONTEXT MENU --- */
+#customMenu { position: fixed; background: rgba(15, 15, 15, 0.95); backdrop-filter: blur(30px); border: 1px solid var(--border); border-radius: 24px; display: none; flex-direction: column; width: 260px; z-index: 1100; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.5); }
+.menu-item { padding: 22px; text-align: center; cursor: pointer; font-size: 16px; font-weight: 600; border-bottom: 1px solid var(--border); transition: background 0.2s; }
+.menu-item:hover { background: rgba(255,255,255,0.05); }
+.menu-item.danger { color: #ff4d4d; border: none; }
+
+/* --- LIGHTBOX --- */
+#screenshotView { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 2000; display: none; align-items: center; justify-content: center; }
+#screenshotImg { width: 100%; height: auto; object-fit: contain; }
+</style>
+</head>
+
+<body>
+
+<div class="brand-header">
+    <div class="logo-container"><div class="logo-sq"></div><div class="logo-sq"></div><div class="logo-sq"></div><div class="logo-sq"></div></div>
+    <div class="brand-name">Clada ImageX</div>
+</div>
+
+<div id="screenshotView" onclick="closeScreenshot()"><img id="screenshotImg" alt="Preview"></div>
+
+<div class="display">
+    <div class="grok-dot-field" id="grokLoader"></div>
+    <img id="outputImg" alt="Generated Artwork">
+    
+    <div id="customMenu">
+        <div class="menu-item" onclick="openScreenshot()">Full View</div>
+        <div class="menu-item" onclick="handleDownload()">Download Original</div>
+        <div class="menu-item danger" onclick="closeMenu()">Cancel</div>
+    </div>
+</div>
+
+<div class="input-area">
+    <div class="search-container">
+        <input type="text" id="promptInput" placeholder="A futuristic cyberpunk city..." autocomplete="off">
+        <button id="genBtn">
+            <svg style="width:26px;height:26px;stroke:#000;stroke-width:3.5;fill:none" viewBox="0 0 24 24"><path d="M12 19V5M12 5L5 12M12 5L19 12" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+    </div>
+</div>
+
+<script>
+const API_KEY = 'sk_wbQthv1A9ZgPABaCEs2nwISrtjvElZco';
+const input = document.getElementById('promptInput');
+const btn = document.getElementById('genBtn');
+const img = document.getElementById('outputImg');
+const loader = document.getElementById('grokLoader');
+const menu = document.getElementById('customMenu');
+const ssView = document.getElementById('screenshotView');
+const ssImg = document.getElementById('screenshotImg');
+
+let currentBlob = null;
+let longPressTimer;
+
+// Create animated loader grid
+for (let i = 0; i < 64; i++) {
+    const d = document.createElement('div');
+    d.className = 'grok-dot';
+    d.style.animationDelay = `${Math.random() * 2}s`;
+    loader.appendChild(d);
+}
+
+async function generate() {
+    const prompt = input.value.trim();
+    if (!prompt) return;
+
+    // Reset UI for new generation
+    btn.disabled = true;
+    loader.style.display = 'grid';
+    setTimeout(() => loader.style.opacity = "1", 10);
+    img.style.display = 'none';
+
+    try {
+        const seed = Math.floor(Math.random() * 1000000);
+        // Using the 2026 Flux endpoint with specific parameters
+        const url = `https://gen.pollinations.ai/image/${encodeURIComponent(prompt)}?seed=${seed}&width=1024&height=1024&model=flux&nologo=true`;
+
+        const response = await fetch(url, {
+            headers: { 'Authorization': `Bearer ${API_KEY}` }
+        });
+
+        if (!response.ok) {
+            const errorMsg = await response.text();
+            throw new Error(`Status ${response.status}: ${errorMsg}`);
+        }
+
+        // Capture as Blob to ensure clean download later
+        currentBlob = await response.blob();
+        const objectURL = URL.createObjectURL(currentBlob);
+        
+        img.src = objectURL;
+        img.onload = () => {
+            loader.style.opacity = "0";
+            setTimeout(() => { 
+                loader.style.display = 'none'; 
+                img.style.display = 'block'; 
+            }, 400);
+            btn.disabled = false;
+        };
+    } catch (err) {
+        console.error("Gen Error:", err);
+        alert(`Generation Error: ${err.message}. Please check your API balance.`);
+        btn.disabled = false;
+        loader.style.display = 'none';
+    }
+}
+
+// -------- FILE SAVER INTEGRATION --------
+function handleDownload() {
+    closeMenu();
+    if (!currentBlob) {
+        alert("Generate an image first!");
+        return;
+    }
+    
+    // Generates a clean filename
+    const timestamp = new Date().getTime();
+    const fileName = `Clada-X-${timestamp}.jpg`;
+    
+    // Actual FileSaver call
+    saveAs(currentBlob, fileName);
+}
+
+// UI Handlers
+function openScreenshot() { closeMenu(); ssImg.src = img.src; ssView.style.display = 'flex'; }
+function closeScreenshot() { ssView.style.display = 'none'; }
+
+function showMenu(x, y) { 
+    menu.style.left = `${Math.min(x, window.innerWidth - 280)}px`; 
+    menu.style.top = `${Math.min(y, window.innerHeight - 250)}px`; 
+    menu.style.display = 'flex'; 
+}
+
+function closeMenu() { menu.style.display = 'none'; }
+
+// Interactions
+img.addEventListener('touchstart', (e) => { 
+    longPressTimer = setTimeout(() => showMenu(e.touches[0].clientX, e.touches[0].clientY), 600); 
+});
+img.addEventListener('touchend', () => clearTimeout(longPressTimer));
+img.addEventListener('contextmenu', (e) => { 
+    e.preventDefault(); 
+    showMenu(e.clientX, e.clientY); 
+});
+
+window.onclick = (e) => { if (!menu.contains(e.target) && e.target !== img) closeMenu(); };
+btn.onclick = generate;
+input.onkeypress = (e) => { if (e.key === 'Enter') generate(); };
+</script>
+</body>
+</html>
